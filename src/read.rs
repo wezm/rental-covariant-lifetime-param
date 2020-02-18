@@ -27,32 +27,32 @@ pub struct ReadCtxt<'a> {
 }
 
 #[derive(Clone)]
-pub struct ReadArray<'a, T: ReadFixedSizeDep<'a>> {
-    // scope: ReadScope<'a>,
+pub struct ReadArray<'a, T: ReadFixedSizeDep> {
+    scope: ReadScope<'a>,
     length: usize,
     args: T::Args,
 }
 
-pub trait ReadBinary<'a> {
+pub trait ReadBinary {
     type HostType: Sized; // default = Self
 
-    fn read(ctxt: &mut ReadCtxt<'a>) -> Result<Self::HostType, ParseError>;
+    fn read<'a>(ctxt: &mut ReadCtxt<'a>) -> Result<Self::HostType, ParseError>;
 }
 
-pub trait ReadBinaryDep<'a> {
+pub trait ReadBinaryDep {
     type Args: Clone;
     type HostType: Sized; // default = Self
 
-    fn read_dep(ctxt: &mut ReadCtxt<'a>, args: Self::Args) -> Result<Self::HostType, ParseError>;
+    fn read_dep<'a>(ctxt: &mut ReadCtxt<'a>, args: Self::Args) -> Result<Self::HostType, ParseError>;
 }
 
-pub trait ReadFixedSizeDep<'a>: ReadBinaryDep<'a> {
+pub trait ReadFixedSizeDep: ReadBinaryDep {
     /// The number of bytes consumed by `ReadBinaryDep::read`.
     fn size(args: Self::Args) -> usize;
 }
 
 /// Read will always succeed if sufficient bytes are available.
-pub trait ReadUnchecked<'a> {
+pub trait ReadUnchecked {
     type HostType: Sized; // default = Self
 
     /// The number of bytes consumed by `read_unchecked`.
@@ -60,56 +60,56 @@ pub trait ReadUnchecked<'a> {
 
     /// Must read exactly `SIZE` bytes.
     /// Unsafe as it avoids prohibitively expensive per-byte bounds checking.
-    unsafe fn read_unchecked(ctxt: &mut ReadCtxt<'a>) -> Self::HostType;
+    unsafe fn read_unchecked<'a>(ctxt: &mut ReadCtxt<'a>) -> Self::HostType;
 }
 
-pub trait ReadFrom<'a> {
-    type ReadType: ReadUnchecked<'a>;
-    fn from(value: <Self::ReadType as ReadUnchecked<'a>>::HostType) -> Self;
+pub trait ReadFrom {
+    type ReadType: ReadUnchecked;
+    fn from(value: <Self::ReadType as ReadUnchecked>::HostType) -> Self;
 }
 
-impl<'a, T> ReadUnchecked<'a> for T
+impl<T> ReadUnchecked for T
 where
-    T: ReadFrom<'a>,
+    T: ReadFrom,
 {
     type HostType = T;
 
     const SIZE: usize = T::ReadType::SIZE;
 
-    unsafe fn read_unchecked(ctxt: &mut ReadCtxt<'a>) -> Self::HostType {
+    unsafe fn read_unchecked<'a>(ctxt: &mut ReadCtxt<'a>) -> Self::HostType {
         let t = T::ReadType::read_unchecked(ctxt);
         T::from(t)
     }
 }
 
-impl<'a, T> ReadBinary<'a> for T
+impl<T> ReadBinary for T
 where
-    T: ReadUnchecked<'a>,
+    T: ReadUnchecked,
 {
     type HostType = T::HostType;
 
-    fn read(ctxt: &mut ReadCtxt<'a>) -> Result<Self::HostType, ParseError> {
+    fn read<'a>(ctxt: &mut ReadCtxt<'a>) -> Result<Self::HostType, ParseError> {
         ctxt.check_avail(T::SIZE)?;
         Ok(unsafe { T::read_unchecked(ctxt) })
         // Safe because we have `SIZE` bytes available.
     }
 }
 
-impl<'a, T> ReadBinaryDep<'a> for T
+impl<T> ReadBinaryDep for T
 where
-    T: ReadBinary<'a>,
+    T: ReadBinary,
 {
     type Args = ();
     type HostType = T::HostType;
 
-    fn read_dep(ctxt: &mut ReadCtxt<'a>, (): Self::Args) -> Result<Self::HostType, ParseError> {
+    fn read_dep<'a>(ctxt: &mut ReadCtxt<'a>, (): Self::Args) -> Result<Self::HostType, ParseError> {
         T::read(ctxt)
     }
 }
 
-impl<'a, T> ReadFixedSizeDep<'a> for T
+impl<T> ReadFixedSizeDep for T
 where
-    T: ReadUnchecked<'a>,
+    T: ReadUnchecked,
 {
     fn size((): ()) -> usize {
         T::SIZE
@@ -134,12 +134,12 @@ impl<'a> ReadCtxt<'a> {
     }
 }
 
-impl<'a> ReadUnchecked<'a> for U32Be {
+impl ReadUnchecked for U32Be {
     type HostType = u32;
 
     const SIZE: usize = size::U32;
 
-    unsafe fn read_unchecked(ctxt: &mut ReadCtxt<'a>) -> u32 {
+    unsafe fn read_unchecked<'a>(ctxt: &mut ReadCtxt<'a>) -> u32 {
         ctxt.read_unchecked_u32be()
     }
 }

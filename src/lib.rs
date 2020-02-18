@@ -22,7 +22,7 @@ rental! {
         #[rental(covariant)]
         pub struct CBLC {
             data: Box<[u8]>,
-            table: TestTable<'data>
+            table: ReadArray<'data, U32Be>
         }
 
         // This one works
