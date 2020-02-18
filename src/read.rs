@@ -132,7 +132,6 @@ impl<'a> ReadCtxt<'a> {
         self.offset += 4;
         (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
     }
-
 }
 
 impl<'a> ReadUnchecked<'a> for U32Be {

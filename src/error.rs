@@ -3,7 +3,6 @@
 use crate::read::ReadEof;
 use std::fmt;
 
-
 /// Errors that originate when parsing binary data
 #[derive(Debug, Eq, PartialEq)]
 pub enum ParseError {
@@ -47,4 +46,3 @@ impl fmt::Display for ParseError {
 }
 
 impl std::error::Error for ParseError {}
-
