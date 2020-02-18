@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use crate::error::ParseError;
+use std::marker::PhantomData;
 
 #[derive(Copy, Clone)]
 pub enum U32Be {}
@@ -27,10 +28,17 @@ pub struct ReadCtxt<'a> {
 }
 
 #[derive(Clone)]
-pub struct ReadArray<'a, T: ReadFixedSizeDep<'a>> {
-    // scope: ReadScope<'a>,
+pub struct ReadArray<'a, T> {
+    scope: ReadScope<'a>,
     length: usize,
-    args: T::Args,
+    // args: T::Args,
+    _item: PhantomData<T>,
+}
+
+pub struct ReadArrayIter<'a, T: ReadUnchecked<'a>> {
+    ctxt: ReadCtxt<'a>,
+    length: usize,
+    phantom: PhantomData<T>,
 }
 
 pub trait ReadBinary<'a> {
@@ -124,6 +132,28 @@ impl<'a> ReadCtxt<'a> {
         }
     }
 
+    pub fn read_array<T: ReadUnchecked<'a>>(
+        &mut self,
+        length: usize,
+    ) -> Result<ReadArray<'a, T>, ParseError> {
+        let scope = self.read_scope(length * T::SIZE)?;
+        let args = ();
+        Ok(ReadArray {
+            scope,
+            length,
+            _item: PhantomData,
+        })
+    }
+
+    pub fn read_scope(&mut self, length: usize) -> Result<ReadScope<'a>, ReadEof> {
+        if let Ok(scope) = self.scope.offset_length(self.offset, length) {
+            self.offset += length;
+            Ok(scope)
+        } else {
+            Err(ReadEof {})
+        }
+    }
+
     unsafe fn read_unchecked_u32be(&mut self) -> u32 {
         let b0 = u32::from(*self.scope.data.get_unchecked(self.offset));
         let b1 = u32::from(*self.scope.data.get_unchecked(self.offset + 1));
@@ -141,5 +171,99 @@ impl<'a> ReadUnchecked<'a> for U32Be {
 
     unsafe fn read_unchecked(ctxt: &mut ReadCtxt<'a>) -> u32 {
         ctxt.read_unchecked_u32be()
+    }
+}
+
+impl<'a, T: ReadFixedSizeDep<'a>> ReadArray<'a, T> {
+    pub fn len(&self) -> usize {
+        self.length
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
+
+    pub fn iter(&self) -> ReadArrayIter<'a, T>
+    where
+        T: ReadUnchecked<'a>,
+    {
+        ReadArrayIter {
+            ctxt: self.scope.ctxt(),
+            length: self.length,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: ReadUnchecked<'a>> Iterator for ReadArrayIter<'a, T> {
+    type Item = T::HostType;
+
+    fn next(&mut self) -> Option<T::HostType> {
+        if self.length > 0 {
+            self.length -= 1;
+            Some(unsafe { T::read_unchecked(&mut self.ctxt) })
+        // Safe because we have (at least) `SIZE` bytes available.
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.length, Some(self.length))
+    }
+}
+
+impl<'a> ReadScope<'a> {
+    pub fn new(data: &'a [u8]) -> ReadScope<'a> {
+        let base = 0;
+        ReadScope { base, data }
+    }
+
+    pub fn offset_length(&self, offset: usize, length: usize) -> Result<ReadScope<'a>, ParseError> {
+        if offset < self.data.len() || length == 0 {
+            let data = &self.data[offset..];
+            if length <= data.len() {
+                let base = self.base + offset;
+                let data = &data[0..length];
+                Ok(ReadScope { base, data })
+            } else {
+                Err(ParseError::BadEof)
+            }
+        } else {
+            Err(ParseError::BadOffset)
+        }
+    }
+
+    pub fn ctxt(&self) -> ReadCtxt<'a> {
+        ReadCtxt::new(self.clone())
+    }
+}
+
+impl<'a> ReadCtxt<'a> {
+    /// ReadCtxt is constructed by calling `ReadScope::ctxt`.
+    fn new(scope: ReadScope<'a>) -> ReadCtxt<'a> {
+        ReadCtxt { scope, offset: 0 }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read_array_iter() {
+        let mut data = Vec::new();
+        for i in 0..100 {
+            data.push(0u8);
+            data.push(0u8);
+            data.push(0u8);
+            data.push(i);
+        }
+
+        let mut ctxt = ReadScope::new(&data).ctxt();
+        let array = ctxt.read_array::<U32Be>(10).unwrap();
+        for x in array.iter() {
+            println!("{}", x);
+        }
     }
 }
